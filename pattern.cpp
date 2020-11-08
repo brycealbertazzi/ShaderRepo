@@ -13,7 +13,6 @@
 #include <GLUT/GLUT.h>
 
 
-
 //    This is a sample OpenGL / GLUT program
 //
 //    The objective is to draw a 3d object and change the color of the axes
@@ -42,6 +41,10 @@
 
 const char *WINDOWTITLE = { "OpenGL / GLUT Sample -- Bryce Albertazzi" };
 const char *GLUITITLE   = { "User Interface Window" };
+
+#define MS_PER_CYCLE 3000
+float Time;
+
 
 // what the glui package defines as true and false:
 
@@ -182,12 +185,16 @@ int        DebugOn;                // != 0 means to print debugging info
 int        DepthCueOn;                // != 0 means to use intensity depth cueing
 int        DepthBufferOn;            // != 0 means to use the z-buffer
 int        DepthFightingOn;        // != 0 means to force the creation of z-fighting
-GLuint    BoxList;                // object display list
+GLuint    SphereList;                // sphere display list
+GLuint    EarthTexture;
 int        MainWindow;                // window id for main graphics window
 float    Scale;                    // scaling factor
 int        ShadowsOn;                // != 0 means to turn shadows on
 int        WhichColor;                // index into Colors[ ]
 int        WhichProjection;        // ORTHO or PERSP
+int        VertexAnimationEnabled;
+int         FragmentAnimationEnabled;
+int         TextureDisplay;
 int        Xmouse, Ymouse;            // mouse values
 float    Xrot, Yrot;                // rotation angles in degrees
 
@@ -204,6 +211,7 @@ void    DoDepthMenu( int );
 void    DoDebugMenu( int );
 void    DoMainMenu( int );
 void    DoProjectMenu( int );
+void    DoTextureMenu( int );
 void    DoShadowMenu();
 void    DoRasterString( float, float, float, char * );
 void    DoStrokeString( float, float, float, float, char * );
@@ -269,6 +277,350 @@ main( int argc, char *argv[ ] )
     return 0;
 }
 
+/////Draw Sphere//////
+bool    Distort;        // global -- true means to distort the texture
+
+struct point {
+    float x, y, z;        // coordinates
+    float nx, ny, nz;    // surface normal
+    float s, t;        // texture coords
+};
+
+int        NumLngs, NumLats;
+struct point *    Pts;
+
+struct point *
+PtsPointer( int lat, int lng )
+{
+    if( lat < 0 )    lat += (NumLats-1);
+    if( lng < 0 )    lng += (NumLngs-1);
+    if( lat > NumLats-1 )    lat -= (NumLats-1);
+    if( lng > NumLngs-1 )    lng -= (NumLngs-1);
+    return &Pts[ NumLngs*lat + lng ];
+}
+
+
+
+void
+DrawPoint( struct point *p )
+{
+    glNormal3f( p->nx, p->ny, p->nz );
+    glTexCoord2f( p->s, p->t );
+    glVertex3f( p->x, p->y, p->z );
+}
+
+void
+MjbSphere( float radius, int slices, int stacks )
+{
+    struct point top, bot;        // top, bottom points
+    struct point *p;
+
+    // set the globals:
+
+    NumLngs = slices;
+    NumLats = stacks;
+
+    if( NumLngs < 3 )
+        NumLngs = 3;
+
+    if( NumLats < 3 )
+        NumLats = 3;
+
+
+    // allocate the point data structure:
+
+    Pts = new struct point[ NumLngs * NumLats ];
+
+
+    // fill the Pts structure:
+
+    for( int ilat = 0; ilat < NumLats; ilat++ )
+    {
+        float lat = -M_PI/2.  +  M_PI * (float)ilat / (float)(NumLats-1);
+        float xz = cos( lat );
+        float y = sin( lat );
+        for( int ilng = 0; ilng < NumLngs; ilng++ )
+        {
+            float lng = -M_PI  +  2. * M_PI * (float)ilng / (float)(NumLngs-1);
+            float x =  xz * cos( lng );
+            float z = -xz * sin( lng );
+            p = PtsPointer( ilat, ilng );
+            if (VertexAnimationEnabled == 1) {
+                p->x  = radius * x * sin(Time);
+                p->y  = radius * y * cos(Time);
+            } else {
+                p->x  = radius * x;
+                p->y  = radius * y;
+            }
+            p->z  = radius * z;
+            p->nx = x;
+            p->ny = y;
+            p->nz = z;
+            if( TextureDisplay == 2 )
+            {
+                // Distort the texture
+                if (ilat < NumLats / 2) {
+                    p->s = ( (lng + M_PI) ) / ( 2.*M_PI ) + ((Time / 10) - 0.05);
+                    p->t = ( (lat + M_PI/2.) ) / M_PI + ((Time / 10) - 0.05);
+                } else {
+                    p->s = ( (lng + M_PI) ) / ( 2.*M_PI ) - ((Time / 10) - 0.05);
+                    p->t = ( (lat + M_PI/2.) ) / M_PI - ((Time / 10) - 0.05);
+                }
+                
+            }
+            else
+            {
+                p->s = ( lng + M_PI    ) / ( 2.*M_PI );
+                p->t = ( lat + M_PI/2. ) / M_PI;
+            }
+        }
+    }
+
+    top.x =  0.;        top.y  = radius;    top.z = 0.;
+    top.nx = 0.;        top.ny = 1.;        top.nz = 0.;
+    top.s  = 0.;        top.t  = 1.;
+
+    bot.x =  0.;        bot.y  = -radius;    bot.z = 0.;
+    bot.nx = 0.;        bot.ny = -1.;        bot.nz = 0.;
+    bot.s  = 0.;        bot.t  =  0.;
+
+
+    // connect the north pole to the latitude NumLats-2:
+    
+    glBegin( GL_QUADS );
+    for( int ilng = 0; ilng < NumLngs-1; ilng++ )
+    {
+        p = PtsPointer( NumLats-1, ilng );
+        DrawPoint( p );
+
+        p = PtsPointer( NumLats-2, ilng );
+        DrawPoint( p );
+
+        p = PtsPointer( NumLats-2, ilng+1 );
+        DrawPoint( p );
+
+        p = PtsPointer( NumLats-1, ilng+1 );
+        DrawPoint( p );
+    }
+    glEnd( );
+
+    // connect the south pole to the latitude 1:
+    glBegin( GL_QUADS );
+    for( int ilng = 0; ilng < NumLngs-1; ilng++ )
+    {
+        p = PtsPointer( 0, ilng );
+        DrawPoint( p );
+
+        p = PtsPointer( 0, ilng+1 );
+        DrawPoint( p );
+
+        p = PtsPointer( 1, ilng+1 );
+        DrawPoint( p );
+
+        p = PtsPointer( 1, ilng );
+        DrawPoint( p );
+    }
+    glEnd( );
+
+
+    // connect the other 4-sided polygons:
+
+    glBegin( GL_QUADS );
+    for( int ilat = 2; ilat < NumLats-1; ilat++ )
+    {
+        for( int ilng = 0; ilng < NumLngs-1; ilng++ )
+        {
+            p = PtsPointer( ilat-1, ilng );
+            DrawPoint( p );
+
+            p = PtsPointer( ilat-1, ilng+1 );
+            DrawPoint( p );
+
+            p = PtsPointer( ilat, ilng+1 );
+            DrawPoint( p );
+
+            p = PtsPointer( ilat, ilng );
+            DrawPoint( p );
+        }
+    }
+    glEnd( );
+
+    delete [ ] Pts;
+    Pts = NULL;
+}
+////////////////////
+///Draw Earth texture onto sphere
+int    ReadInt( FILE * );
+short    ReadShort( FILE * );
+
+
+struct bmfh
+{
+    short bfType;
+    int bfSize;
+    short bfReserved1;
+    short bfReserved2;
+    int bfOffBits;
+} FileHeader;
+
+struct bmih
+{
+    int biSize;
+    int biWidth;
+    int biHeight;
+    short biPlanes;
+    short biBitCount;
+    int biCompression;
+    int biSizeImage;
+    int biXPelsPerMeter;
+    int biYPelsPerMeter;
+    int biClrUsed;
+    int biClrImportant;
+} InfoHeader;
+
+const int birgb = { 0 };
+
+
+
+/**
+ ** read a BMP file into a Texture:
+ **/
+
+unsigned char *
+BmpToTexture( char *filename, int *width, int *height )
+{
+
+    int s, t, e;        // counters
+    int numextra;        // # extra bytes each line in the file is padded with
+    FILE *fp;
+    unsigned char *texture;
+    int nums, numt;
+    unsigned char *tp;
+    
+
+
+    fp = fopen( filename, "rb" );
+    if( fp == NULL )
+    {
+        fprintf( stderr, "Cannot open Bmp file '%s'\n", filename );
+        perror("Error");
+        return NULL;
+    }
+
+    FileHeader.bfType = ReadShort( fp );
+
+
+    // if bfType is not 0x4d42, the file is not a bmp:
+
+    if( FileHeader.bfType != 0x4d42 )
+    {
+        fprintf( stderr, "Wrong type of file: 0x%0x\n", FileHeader.bfType );
+        fclose( fp );
+        return NULL;
+    }
+
+
+    FileHeader.bfSize = ReadInt( fp );
+    FileHeader.bfReserved1 = ReadShort( fp );
+    FileHeader.bfReserved2 = ReadShort( fp );
+    FileHeader.bfOffBits = ReadInt( fp );
+
+
+    InfoHeader.biSize = ReadInt( fp );
+    InfoHeader.biWidth = ReadInt( fp );
+    InfoHeader.biHeight = ReadInt( fp );
+
+    nums = InfoHeader.biWidth;
+    numt = InfoHeader.biHeight;
+
+    InfoHeader.biPlanes = ReadShort( fp );
+    InfoHeader.biBitCount = ReadShort( fp );
+    InfoHeader.biCompression = ReadInt( fp );
+    InfoHeader.biSizeImage = ReadInt( fp );
+    InfoHeader.biXPelsPerMeter = ReadInt( fp );
+    InfoHeader.biYPelsPerMeter = ReadInt( fp );
+    InfoHeader.biClrUsed = ReadInt( fp );
+    InfoHeader.biClrImportant = ReadInt( fp );
+
+
+    // fprintf( stderr, "Image size found: %d x %d\n", ImageWidth, ImageHeight );
+
+
+    texture = new unsigned char[ 3 * nums * numt ];
+    if( texture == NULL )
+    {
+        fprintf( stderr, "Cannot allocate the texture array!\b" );
+        return NULL;
+    }
+
+
+    // extra padding bytes:
+
+    numextra =  4*(( (3*InfoHeader.biWidth)+3)/4) - 3*InfoHeader.biWidth;
+
+
+    // we do not support compression:
+
+    if( InfoHeader.biCompression != birgb )
+    {
+        fprintf( stderr, "Wrong type of image compression: %d\n", InfoHeader.biCompression );
+        fclose( fp );
+        return NULL;
+    }
+    
+
+
+    rewind( fp );
+    fseek( fp, 14+40, SEEK_SET );
+
+    if( InfoHeader.biBitCount == 24 )
+    {
+        for( t = 0, tp = texture; t < numt; t++ )
+        {
+            for( s = 0; s < nums; s++, tp += 3 )
+            {
+                *(tp+2) = fgetc( fp );        // b
+                *(tp+1) = fgetc( fp );        // g
+                *(tp+0) = fgetc( fp );        // r
+            }
+
+            for( e = 0; e < numextra; e++ )
+            {
+                fgetc( fp );
+            }
+        }
+    }
+
+    fclose( fp );
+
+    *width = nums;
+    *height = numt;
+    return texture;
+}
+
+
+
+int
+ReadInt( FILE *fp )
+{
+    unsigned char b3, b2, b1, b0;
+    b0 = fgetc( fp );
+    b1 = fgetc( fp );
+    b2 = fgetc( fp );
+    b3 = fgetc( fp );
+    return ( b3 << 24 )  |  ( b2 << 16 )  |  ( b1 << 8 )  |  b0;
+}
+
+
+short
+ReadShort( FILE *fp )
+{
+    unsigned char b1, b0;
+    b0 = fgetc( fp );
+    b1 = fgetc( fp );
+    return ( b1 << 8 )  |  b0;
+}
+////////////////////////
 
 // this is where one would put code that is to be called
 // everytime the glut main loop has nothing to do
@@ -276,6 +628,7 @@ main( int argc, char *argv[ ] )
 // this is typically where animation parameters are set
 //
 // do not call Display( ) from here -- let glutMainLoop( ) do it
+
 
 void
 Animate( )
@@ -286,6 +639,9 @@ Animate( )
     // force a call to Display( ) next time it is convenient:
 
     glutSetWindow( MainWindow );
+    int ms = glutGet( GLUT_ELAPSED_TIME );
+    ms %= MS_PER_CYCLE;
+    Time = (float)ms / (float)MS_PER_CYCLE;        // [0.,1.)
     glutPostRedisplay( );
 }
 
@@ -299,7 +655,11 @@ Display( )
     {
         fprintf( stderr, "Display\n" );
     }
-
+    
+    
+    
+    
+//    MjbSphere(5, 20, 20);
 
     // set which window we want to do the graphics into:
 
@@ -345,7 +705,8 @@ Display( )
     else
         gluPerspective( 90., 1.,    0.1, 1000. );
 
-
+    
+    
     // place the objects into the scene:
 
     glMatrixMode( GL_MODELVIEW );
@@ -354,7 +715,7 @@ Display( )
 
     // set the eye position, look-at position, and up-vector:
 
-    gluLookAt( 0., 0., 3.,     0., 0., 0.,     0., 1., 0. );
+    gluLookAt( 0., 0., 10.,     0., 0., 0.,     0., 1., 0. );
 
 
     // rotate the scene:
@@ -369,7 +730,7 @@ Display( )
         Scale = MINSCALE;
     glScalef( (GLfloat)Scale, (GLfloat)Scale, (GLfloat)Scale );
 
-
+    
     // set the fog parameters:
 
     if( DepthCueOn != 0 )
@@ -403,7 +764,7 @@ Display( )
 
     // draw the current object:
 
-    glCallList( BoxList );
+    glCallList( SphereList );
 
 #ifdef DEMO_Z_FIGHTING
     if( DepthFightingOn != 0 )
@@ -452,6 +813,20 @@ Display( )
     // note: be sure to use glFlush( ) here, not glFinish( ) !
 
     glFlush( );
+    
+    // Draw the Earth texture onto the sphere
+    //Draw the sphere
+    SphereList = glGenLists(1);
+    glNewList(SphereList, GL_COMPILE);
+        if (TextureDisplay != 0) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, EarthTexture);
+        } else {
+            glDisable(GL_TEXTURE_2D);
+        }
+        MjbSphere(5, 20, 20);
+    glEndList();
+    
 }
 
 
@@ -554,6 +929,13 @@ DoProjectMenu( int id )
     glutPostRedisplay( );
 }
 
+void DoTextureMenu ( int id ) {
+    TextureDisplay = id;
+    
+    glutSetWindow( MainWindow );
+    glutPostRedisplay( );
+}
+
 
 void
 DoShadowsMenu(int id)
@@ -650,6 +1032,11 @@ InitMenus( )
     int projmenu = glutCreateMenu( DoProjectMenu );
     glutAddMenuEntry( "Orthographic",  ORTHO );
     glutAddMenuEntry( "Perspective",   PERSP );
+    
+    int texturemenu = glutCreateMenu ( DoTextureMenu );
+    glutAddMenuEntry("No Texture", 0);
+    glutAddMenuEntry("Normal Texture", 1);
+    glutAddMenuEntry("Distorted Texture", 2);
 
     int shadowsmenu = glutCreateMenu(DoShadowsMenu);
     glutAddMenuEntry("Off", 0);
@@ -669,6 +1056,7 @@ InitMenus( )
 
     glutAddSubMenu(   "Depth Cue",     depthcuemenu);
     glutAddSubMenu(   "Projection",    projmenu );
+    glutAddSubMenu("Texture Type", texturemenu);
 
 #ifdef ENABLE_SHADOWS
     glutAddSubMenu(   "Shadows",       shadowsmenu);
@@ -687,6 +1075,9 @@ InitMenus( )
 
 // initialize the glut and OpenGL libraries:
 //    also setup display lists and callback functions
+
+
+int width, height;
 
 void
 InitGraphics( )
@@ -750,7 +1141,7 @@ InitGraphics( )
     glutTabletButtonFunc( NULL );
     glutMenuStateFunc( NULL );
     glutTimerFunc( -1, NULL, 0 );
-    glutIdleFunc( NULL );
+    glutIdleFunc( Animate );
 
     // init glew (a window must be open to do this):
 
@@ -764,7 +1155,20 @@ InitGraphics( )
         fprintf( stderr, "GLEW initialized OK\n" );
     fprintf( stderr, "Status: Using GLEW %s\n", glewGetString(GLEW_VERSION));
 #endif
-
+    
+    // Initialize Earth texture
+    char *filename = (char*)"red-texture.bmp";
+    unsigned char *TextureArray0 = BmpToTexture(filename, &width, &height);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glGenTextures(1, &EarthTexture);
+    glBindTexture(GL_TEXTURE_2D, EarthTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    glTexImage2D(GL_TEXTURE_2D, 0, 3, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, TextureArray0);
+    
 }
 
 
@@ -776,66 +1180,9 @@ InitGraphics( )
 void
 InitLists( )
 {
-    float dx = BOXSIZE / 2.f;
-    float dy = BOXSIZE / 2.f;
-    float dz = BOXSIZE / 2.f;
+    
     glutSetWindow( MainWindow );
-
-    // create the object:
-
-    BoxList = glGenLists( 1 );
-    glNewList( BoxList, GL_COMPILE );
-
-        glBegin( GL_QUADS );
-
-            glColor3f( 0., 0., 1. );
-            glNormal3f( 0., 0.,  1. );
-                glVertex3f( -dx, -dy,  dz );
-                glVertex3f(  dx, -dy,  dz );
-                glVertex3f(  dx,  dy,  dz );
-                glVertex3f( -dx,  dy,  dz );
-
-            glNormal3f( 0., 0., -1. );
-                glTexCoord2f( 0., 0. );
-                glVertex3f( -dx, -dy, -dz );
-                glTexCoord2f( 0., 1. );
-                glVertex3f( -dx,  dy, -dz );
-                glTexCoord2f( 1., 1. );
-                glVertex3f(  dx,  dy, -dz );
-                glTexCoord2f( 1., 0. );
-                glVertex3f(  dx, -dy, -dz );
-
-            glColor3f( 1., 0., 0. );
-            glNormal3f(  1., 0., 0. );
-                glVertex3f(  dx, -dy,  dz );
-                glVertex3f(  dx, -dy, -dz );
-                glVertex3f(  dx,  dy, -dz );
-                glVertex3f(  dx,  dy,  dz );
-
-            glNormal3f( -1., 0., 0. );
-                glVertex3f( -dx, -dy,  dz );
-                glVertex3f( -dx,  dy,  dz );
-                glVertex3f( -dx,  dy, -dz );
-                glVertex3f( -dx, -dy, -dz );
-
-            glColor3f( 0., 1., 0. );
-            glNormal3f( 0.,  1., 0. );
-                glVertex3f( -dx,  dy,  dz );
-                glVertex3f(  dx,  dy,  dz );
-                glVertex3f(  dx,  dy, -dz );
-                glVertex3f( -dx,  dy, -dz );
-
-            glNormal3f( 0., -1., 0. );
-                glVertex3f( -dx, -dy,  dz );
-                glVertex3f( -dx, -dy, -dz );
-                glVertex3f(  dx, -dy, -dz );
-                glVertex3f(  dx, -dy,  dz );
-
-        glEnd( );
-
-    glEndList( );
-
-
+    
     // create the axes:
 
     AxesList = glGenLists( 1 );
@@ -854,7 +1201,7 @@ Keyboard( unsigned char c, int x, int y )
 {
     if( DebugOn != 0 )
         fprintf( stderr, "Keyboard: '%c' (0x%0x)\n", c, c );
-
+    
     switch( c )
     {
         case 'o':
@@ -873,6 +1220,26 @@ Keyboard( unsigned char c, int x, int y )
             DoMainMenu( QUIT );    // will not return here
             break;                // happy compiler
 
+        case 'b':
+            VertexAnimationEnabled = 1;
+            TextureDisplay = 2;
+            break;
+            
+        case 'f':
+            VertexAnimationEnabled = 0;
+            TextureDisplay = 1;
+            break;
+            
+        case 'F':
+            TextureDisplay = 2;
+            VertexAnimationEnabled = 0;
+            break;
+            
+        case 'V':
+            VertexAnimationEnabled = 1;
+            TextureDisplay = 1;
+            break;
+            
         default:
             fprintf( stderr, "Don't know what to do with keyboard hit: '%c' (0x%0x)\n", c, c );
     }
@@ -1000,7 +1367,10 @@ Reset( )
     ShadowsOn = 0;
     WhichColor = WHITE;
     WhichProjection = PERSP;
+    TextureDisplay = 1;
     Xrot = Yrot = 0.;
+    FragmentAnimationEnabled = 0;
+    VertexAnimationEnabled = 1;
 }
 
 
@@ -1157,148 +1527,6 @@ Axes( float length )
         }
     glEnd( );
 
-}
-
-struct bmfh
-{
-    short bfType;
-    int bfSize;
-    short bfReserved1;
-    short bfReserved2;
-    int bfOffBits;
-} FileHeader;
-
-struct bmih
-{
-    int biSize;
-    int biWidth;
-    int biHeight;
-    short biPlanes;
-    short biBitCount;
-    int biCompression;
-    int biSizeImage;
-    int biXPelsPerMeter;
-    int biYPelsPerMeter;
-    int biClrUsed;
-    int biClrImportant;
-} InfoHeader;
-
-const int birgb = { 0 };
-
-// read a BMP file into a Texture:
-
-unsigned char *
-BmpToTexture( char *filename, int *width, int *height )
-{
-    FILE *fp = fopen( filename, "rb" );
-    if( fp == NULL )
-    {
-        fprintf( stderr, "Cannot open Bmp file '%s'\n", filename );
-        return NULL;
-    }
-
-    FileHeader.bfType = ReadShort( fp );
-
-
-    // if bfType is not 0x4d42, the file is not a bmp:
-
-    if( FileHeader.bfType != 0x4d42 )
-    {
-        fprintf( stderr, "File '%s' is the wrong type of file: 0x%0x\n", filename, FileHeader.bfType );
-        fclose( fp );
-        return NULL;
-    }
-
-    FileHeader.bfSize = ReadInt( fp );
-    FileHeader.bfReserved1 = ReadShort( fp );
-    FileHeader.bfReserved2 = ReadShort( fp );
-    FileHeader.bfOffBits = ReadInt( fp );
-
-    InfoHeader.biSize = ReadInt( fp );
-    InfoHeader.biWidth = ReadInt( fp );
-    InfoHeader.biHeight = ReadInt( fp );
-
-    int nums = InfoHeader.biWidth;
-    int numt = InfoHeader.biHeight;
-
-    InfoHeader.biPlanes = ReadShort( fp );
-    InfoHeader.biBitCount = ReadShort( fp );
-    InfoHeader.biCompression = ReadInt( fp );
-    InfoHeader.biSizeImage = ReadInt( fp );
-    InfoHeader.biXPelsPerMeter = ReadInt( fp );
-    InfoHeader.biYPelsPerMeter = ReadInt( fp );
-    InfoHeader.biClrUsed = ReadInt( fp );
-    InfoHeader.biClrImportant = ReadInt( fp );
-
-    fprintf( stderr, "Image size in file '%s' is: %d x %d\n", filename, nums, numt );
-
-    unsigned char * texture = new unsigned char[ 3 * nums * numt ];
-    if( texture == NULL )
-    {
-        fprintf( stderr, "Cannot allocate the texture array!\b" );
-        return NULL;
-    }
-
-    // extra padding bytes:
-
-    int numextra =  4*(( (3*InfoHeader.biWidth)+3)/4) - 3*InfoHeader.biWidth;
-
-    // we do not support compression:
-
-    if( InfoHeader.biCompression != birgb )
-    {
-        fprintf( stderr, "Image file '%s' has the wrong type of image compression: %d\n", filename, InfoHeader.biCompression );
-        fclose( fp );
-        return NULL;
-    }
-
-    rewind( fp );
-    fseek( fp, 14+40, SEEK_SET );
-
-    if( InfoHeader.biBitCount == 24 )
-    {
-        unsigned char *tp = texture;
-        for( int t = 0; t < numt; t++ )
-        {
-            for( int s = 0; s < nums; s++, tp += 3 )
-            {
-                *(tp+2) = fgetc( fp );        // b
-                *(tp+1) = fgetc( fp );        // g
-                *(tp+0) = fgetc( fp );        // r
-            }
-
-            for( int e = 0; e < numextra; e++ )
-            {
-                fgetc( fp );
-            }
-        }
-    }
-
-    fclose( fp );
-
-    *width = nums;
-    *height = numt;
-    return texture;
-}
-
-int
-ReadInt( FILE *fp )
-{
-    unsigned char b3, b2, b1, b0;
-    b0 = fgetc( fp );
-    b1 = fgetc( fp );
-    b2 = fgetc( fp );
-    b3 = fgetc( fp );
-    return ( b3 << 24 )  |  ( b2 << 16 )  |  ( b1 << 8 )  |  b0;
-}
-
-short
-ReadShort( FILE *fp )
-{
-    unsigned char b1, b0;
-    b0 = fgetc( fp );
-    b1 = fgetc( fp );
-    return ( b1 << 8 )  |  b0;
 }
 
 
